@@ -30,20 +30,22 @@ def sanitize_folder_name(name):
     cleaned = re.sub(r'[<>:"/\\|?*]', '', name).strip()
     return cleaned
 
-def extract_tokens(folder_name):
+def extract_tokens(name):
     """
-    Extract meaningful username / tag tokens from folder names.
+    Extract meaningful username / tag tokens from folder or file names.
     Supports:
       - [userA] [anything]
       - [userA][anything] (no spaces)
       - (userA)(anything)
       - {userA}{anything}
-      - Fallback: split by delimiters if no brackets exist.
+      - Delimiters: !!, _, -, space, dots
     """
+    # Strip file extension if present
+    base_name = os.path.splitext(name)[0]
     tokens = []
     
     # 1. Matches inside [...], (...), or {...}
-    bracket_matches = re.findall(r'\[([^\]]+)\]|\(([^)]+)\)|\{([^}]+)\}', folder_name)
+    bracket_matches = re.findall(r'\[([^\]]+)\]|\(([^)]+)\)|\{([^}]+)\}', base_name)
     for match in bracket_matches:
         for group in match:
             clean_grp = group.strip()
@@ -58,20 +60,24 @@ def extract_tokens(folder_name):
             seen.add(t.lower())
             result.append(t)
             
-    # Fallback if no bracketed tokens were found
-    if not result:
-        parts = re.split(r'[-_\s.]+', folder_name)
-        for p in parts:
-            p = p.strip()
-            if p and len(p) > 1 and p.lower() not in seen:
-                seen.add(p.lower())
-                result.append(p)
+    # Also split by delimiters (words separated by !!, _, -, space, etc.)
+    parts = re.split(r'[!@#$%^&*()_+=\-\[\]{};:\'",.<>?/\\|\s]+', base_name)
+    for p in parts:
+        p = p.strip()
+        # Keep tokens with length >= 2
+        if p and len(p) >= 2 and p.lower() not in seen:
+            seen.add(p.lower())
+            result.append(p)
                 
     return result
 
 def is_image_file(filename):
     ext = os.path.splitext(filename)[1].lower()
     return ext in {'.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp'}
+
+def is_video_file(filename):
+    ext = os.path.splitext(filename)[1].lower()
+    return ext in {'.mp4', '.webm', '.mov', '.mkv', '.avi'}
 
 def analyze_folder(folder_path):
     """
@@ -245,15 +251,64 @@ def browse_directory():
 
 @app.route('/api/scan', methods=['POST'])
 def scan_directory():
-    """Scans parent directory for immediate folders and separates ready vs skipped."""
+    """
+    Scans directory in either 'folders' or 'files' mode:
+    - 'folders' mode: scans immediate subfolders, skips folders that have nested subfolders.
+    - 'files' mode: scans immediate files, ignores subfolders, extracts tokens and media type.
+    """
     data = request.get_json(silent=True) or {}
     dir_path = data.get('path', '').strip()
+    mode = data.get('mode', 'folders')
 
-    print(f"[*] Scan requested for path: {dir_path}")
+    print(f"[*] Scan requested for path: {dir_path} (mode: {mode})")
 
     if not dir_path or not os.path.isdir(dir_path):
         return jsonify({'error': 'Directory does not exist or invalid path.'}), 400
 
+    if mode == 'files':
+        ready_items = []
+        try:
+            entries = sorted(os.scandir(dir_path), key=lambda e: e.name.lower())
+            for entry in entries:
+                if not entry.is_file(follow_symlinks=False):
+                    continue
+
+                if entry.name.startswith('.') or entry.name.lower() in {'desktop.ini', 'thumbs.db'}:
+                    continue
+
+                stat = entry.stat()
+                size_kb = round(stat.st_size / 1024, 1)
+                size_str = f"{size_kb} KB" if size_kb < 1024 else f"{round(size_kb / 1024, 1)} MB"
+
+                is_img = is_image_file(entry.name)
+                is_vid = is_video_file(entry.name)
+                tokens = extract_tokens(entry.name)
+
+                ready_items.append({
+                    'name': entry.name,
+                    'path': os.path.normpath(entry.path),
+                    'size': stat.st_size,
+                    'size_str': size_str,
+                    'is_image': is_img,
+                    'is_video': is_vid,
+                    'ext': os.path.splitext(entry.name)[1].lower(),
+                    'tokens': tokens,
+                    'status': 'ready'
+                })
+
+            return jsonify({
+                'success': True,
+                'mode': 'files',
+                'base_path': os.path.normpath(dir_path),
+                'total_items': len(ready_items),
+                'ready_items': ready_items,
+                'skipped_items': [],
+                'known_usernames': sorted(list(known_usernames))
+            })
+        except Exception as e:
+            return jsonify({'error': str(e), 'success': False}), 500
+
+    # Default: Folders mode
     ready_folders = []
     skipped_folders = []
 
@@ -289,10 +344,11 @@ def scan_directory():
 
         return jsonify({
             'success': True,
+            'mode': 'folders',
             'base_path': os.path.normpath(dir_path),
-            'total_folders': len(ready_folders) + len(skipped_folders),
-            'ready_folders': ready_folders,
-            'skipped_folders': skipped_folders,
+            'total_items': len(ready_folders) + len(skipped_folders),
+            'ready_items': ready_folders,
+            'skipped_items': skipped_folders,
             'known_usernames': sorted(list(known_usernames))
         })
     except Exception as e:
@@ -300,7 +356,7 @@ def scan_directory():
 
 @app.route('/api/preview', methods=['GET'])
 def get_file_preview():
-    """Serves a small thumbnail/preview for image files inside folders."""
+    """Serves image or video files with Range support."""
     folder_path = request.args.get('folder', '')
     filename = request.args.get('file', '')
 
@@ -312,18 +368,19 @@ def get_file_preview():
         return 'File not found', 404
 
     mime, _ = mimetypes.guess_type(full_path)
-    return send_file(full_path, mimetype=mime or 'application/octet-stream')
+    return send_file(full_path, mimetype=mime or 'application/octet-stream', conditional=True)
 
 @app.route('/api/move', methods=['POST'])
-def move_folders():
+def move_items():
     """
-    Moves specified folders into a subfolder named after the selected username
+    Moves specified folders or files into a subfolder named after the selected username
     inside the SAME base directory.
     """
     data = request.get_json(silent=True) or {}
     base_path = data.get('base_path', '').strip()
     username = sanitize_folder_name(data.get('username', ''))
-    folder_names = data.get('folder_names', [])
+    item_names = data.get('items') or data.get('folder_names', [])
+    mode = data.get('mode', 'folders')
 
     if not base_path or not os.path.isdir(base_path):
         return jsonify({'error': 'Invalid base path.'}), 400
@@ -331,8 +388,8 @@ def move_folders():
     if not username:
         return jsonify({'error': 'Username cannot be blank or contain only invalid characters.'}), 400
 
-    if not folder_names or not isinstance(folder_names, list):
-        return jsonify({'error': 'No folders selected to move.'}), 400
+    if not item_names or not isinstance(item_names, list):
+        return jsonify({'error': 'No items selected to move.'}), 400
 
     dest_dir = os.path.normpath(os.path.join(base_path, username))
     
@@ -345,41 +402,50 @@ def move_folders():
     moved_records = []
     errors = []
 
-    for fname in folder_names:
-        src_path = os.path.normpath(os.path.join(base_path, fname))
+    for iname in item_names:
+        src_path = os.path.normpath(os.path.join(base_path, iname))
 
         # Security & sanity checks
         if not os.path.exists(src_path):
-            errors.append(f'Source not found: {fname}')
+            errors.append(f'Source not found: {iname}')
             continue
 
-        if not os.path.isdir(src_path):
-            errors.append(f'Not a directory: {fname}')
+        if mode == 'folders' and not os.path.isdir(src_path):
+            errors.append(f'Not a directory: {iname}')
             continue
 
-        if os.path.samefile(src_path, dest_dir):
-            errors.append(f'Cannot move destination into itself: {fname}')
+        if mode == 'files' and not os.path.isfile(src_path):
+            errors.append(f'Not a file: {iname}')
+            continue
+
+        if os.path.exists(dest_dir) and os.path.samefile(src_path, dest_dir):
+            errors.append(f'Cannot move destination into itself: {iname}')
             continue
 
         # Target path inside username folder
-        target_path = os.path.normpath(os.path.join(dest_dir, fname))
+        target_path = os.path.normpath(os.path.join(dest_dir, iname))
 
         # Handle naming conflict
         counter = 1
-        original_target = target_path
-        while os.path.exists(target_path):
-            target_path = os.path.normpath(os.path.join(dest_dir, f"{fname}_{counter}"))
-            counter += 1
+        if mode == 'files':
+            stem, ext = os.path.splitext(iname)
+            while os.path.exists(target_path):
+                target_path = os.path.normpath(os.path.join(dest_dir, f"{stem}_{counter}{ext}"))
+                counter += 1
+        else:
+            while os.path.exists(target_path):
+                target_path = os.path.normpath(os.path.join(dest_dir, f"{iname}_{counter}"))
+                counter += 1
 
         try:
             shutil.move(src_path, target_path)
             moved_records.append({
                 'source': src_path,
                 'destination': target_path,
-                'folder_name': fname
+                'item_name': iname
             })
         except Exception as e:
-            errors.append(f'Error moving {fname}: {str(e)}')
+            errors.append(f'Error moving {iname}: {str(e)}')
 
     if moved_records:
         known_usernames.add(username)
@@ -387,14 +453,16 @@ def move_folders():
             'username': username,
             'base_path': base_path,
             'dest_dir': dest_dir,
+            'mode': mode,
             'records': moved_records
         })
 
     return jsonify({
         'success': True,
+        'mode': mode,
         'username': username,
         'moved_count': len(moved_records),
-        'moved_folders': [r['folder_name'] for r in moved_records],
+        'moved_items': [r['item_name'] for r in moved_records],
         'destination': dest_dir,
         'errors': errors,
         'known_usernames': sorted(list(known_usernames))
@@ -402,7 +470,7 @@ def move_folders():
 
 @app.route('/api/undo', methods=['POST'])
 def undo_last_move():
-    """Reverts the last move batch."""
+    """Reverts the last move batch (works for both files and folders)."""
     if not move_history:
         return jsonify({'error': 'No moves to undo.'}), 400
 
@@ -413,12 +481,13 @@ def undo_last_move():
     for record in reversed(last_batch['records']):
         dest = record['destination']
         src = record['source']
+        item_label = record.get('item_name') or record.get('folder_name', '')
         try:
             if os.path.exists(dest):
                 shutil.move(dest, src)
-                reverted.append(record['folder_name'])
+                reverted.append(item_label)
         except Exception as e:
-            errors.append(f"Failed to restore {record['folder_name']}: {str(e)}")
+            errors.append(f"Failed to restore {item_label}: {str(e)}")
 
     # Clean up empty username directory if it is empty
     try:
@@ -430,7 +499,7 @@ def undo_last_move():
     return jsonify({
         'success': True,
         'reverted_count': len(reverted),
-        'reverted_folders': reverted,
+        'reverted_items': reverted,
         'errors': errors
     })
 
