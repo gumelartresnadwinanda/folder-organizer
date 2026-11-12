@@ -1,0 +1,1161 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#09090b">
+  <title>Folder Organizer</title>
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    /* Platform native-feel polish */
+    html {
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      touch-action: manipulation;
+    }
+    /* Prevent iOS auto-zoom on input focus while keeping desktop crisp */
+    @media (max-width: 640px) {
+      input[type="text"] {
+        font-size: 16px !important;
+      }
+    }
+    /* Clean custom scrollbar */
+    ::-webkit-scrollbar { width: 5px; height: 5px; }
+    ::-webkit-scrollbar-track { background: #18181b; }
+    ::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 2px; }
+    ::-webkit-scrollbar-thumb:hover { background: #52525b; }
+  </style>
+</head>
+<body class="bg-zinc-950 text-zinc-100 min-h-[100dvh] lg:h-full flex flex-col font-sans antialiased text-xs selection:bg-indigo-600 selection:text-white">
+
+  <!-- Responsive Top Bar -->
+  <header class="bg-zinc-900 border-b border-zinc-800 px-3 sm:px-4 py-2 shrink-0 z-30">
+    <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+      
+      <!-- Brand & Mode Controls -->
+      <div class="flex items-center justify-between gap-2 shrink-0">
+        <div class="flex items-center space-x-2.5">
+          <div class="w-7 h-7 rounded bg-indigo-600 flex items-center justify-center text-white font-bold text-sm shrink-0">
+            <i data-lucide="folder-cog" class="w-4 h-4"></i>
+          </div>
+          <div>
+            <h1 class="text-xs sm:text-sm font-semibold tracking-tight text-zinc-100">Folder Organizer</h1>
+            <p class="text-[10px] text-zinc-400 hidden sm:block">Sort leaf folders by username</p>
+          </div>
+        </div>
+
+        <!-- Mode Switcher -->
+        <div id="tabControls" class="hidden items-center bg-zinc-950 border border-zinc-800 rounded p-0.5 shrink-0">
+          <button id="tabQueueBtn" onclick="switchTab('queue')" class="px-2.5 py-1 rounded bg-zinc-800 text-white font-medium text-[11px]">Review</button>
+          <button id="tabTableBtn" onclick="switchTab('table')" class="px-2.5 py-1 rounded text-zinc-400 hover:text-white text-[11px]">Table</button>
+        </div>
+      </div>
+
+      <!-- Center: Directory Search & Browse Bar -->
+      <div class="flex items-center gap-1.5 flex-1 max-w-xl">
+        <div class="relative flex-1 min-w-0">
+          <input 
+            type="text" 
+            id="directoryInput" 
+            placeholder="Enter folder path or browse..."
+            class="w-full bg-zinc-950 border border-zinc-800 focus:border-indigo-500 rounded px-2.5 py-1.5 text-xs text-zinc-200 placeholder-zinc-500 font-mono focus:outline-none focus:ring-1 focus:ring-indigo-500 truncate"
+            onkeydown="if(event.key === 'Enter') scanDirectory()"
+          />
+        </div>
+
+        <button 
+          type="button" 
+          onclick="browseFolder()" 
+          id="browseBtn"
+          class="px-2.5 sm:px-3 py-1.5 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700 transition flex items-center gap-1 shrink-0 active:scale-95"
+        >
+          <i data-lucide="folder" class="w-3.5 h-3.5 text-amber-400" id="browseIcon"></i>
+          <span id="browseBtnText" class="text-xs">Browse</span>
+        </button>
+
+        <button 
+          type="button" 
+          onclick="scanDirectory()" 
+          id="scanBtn"
+          class="px-3 sm:px-3.5 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-medium transition flex items-center gap-1 shrink-0 disabled:opacity-50 active:scale-95"
+        >
+          <i data-lucide="refresh-cw" class="w-3.5 h-3.5" id="scanIcon"></i>
+          <span class="text-xs">Scan</span>
+        </button>
+      </div>
+
+      <!-- Stats & Undo Action -->
+      <div class="flex items-center justify-between sm:justify-end gap-2 shrink-0">
+        <div id="statsBar" class="hidden items-center gap-1.5 text-[10px] sm:text-[11px] font-mono">
+          <span class="text-zinc-400">Total: <strong id="statTotal" class="text-zinc-200">0</strong></span>
+          <span class="text-zinc-600">&bull;</span>
+          <span class="text-emerald-400">Ready: <strong id="statReady">0</strong></span>
+          <span class="text-zinc-600">&bull;</span>
+          <span class="text-amber-400">Skip: <strong id="statSkipped">0</strong></span>
+          <span class="text-zinc-600">&bull;</span>
+          <span class="text-indigo-400">Moved: <strong id="statMoved">0</strong></span>
+        </div>
+
+        <button id="undoBtn" onclick="undoLastMove()" class="hidden items-center gap-1 px-2.5 py-1 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30 hover:bg-amber-500/20 transition text-[11px] font-medium active:scale-95 shrink-0">
+          <i data-lucide="rotate-ccw" class="w-3 h-3"></i>
+          <span>Undo</span>
+        </button>
+      </div>
+
+    </div>
+  </header>
+
+  <!-- Main View Area -->
+  <main class="flex-1 p-2 sm:p-3 relative flex flex-col lg:overflow-hidden min-h-0">
+
+    <!-- Empty State -->
+    <div id="emptyState" class="h-full flex flex-col items-center justify-center text-center p-6 border border-dashed border-zinc-800 rounded-lg my-auto py-16">
+      <div class="w-12 h-12 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-400 mb-3">
+        <i data-lucide="folder-search" class="w-6 h-6 text-indigo-400"></i>
+      </div>
+      <h3 class="text-sm font-semibold text-zinc-200 mb-1">Select a folder to begin organizing</h3>
+      <p class="text-xs text-zinc-500 max-w-sm mb-4">
+        Click <span class="text-zinc-300 font-medium">Browse</span> or paste a directory path to scan your downloaded folders.
+      </p>
+      <button onclick="browseFolder()" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium transition active:scale-95">
+        Browse Folders
+      </button>
+    </div>
+
+    <!-- Active Workspace -->
+    <div id="workspace" class="hidden h-full flex flex-col lg:overflow-hidden min-h-0">
+
+      <!-- VIEW 1: ONE-BY-ONE SPLIT WORKSPACE -->
+      <div id="viewQueue" class="h-full flex flex-col lg:overflow-hidden min-h-0">
+
+        <!-- Queue Empty Banner -->
+        <div id="queueEmptyState" class="hidden h-full flex flex-col items-center justify-center text-center p-8 bg-zinc-900/50 border border-zinc-800 rounded-lg space-y-3 my-auto py-16">
+          <div id="queueEmptyIcon" class="w-12 h-12 mx-auto rounded-lg flex items-center justify-center bg-zinc-800 text-zinc-400">
+            <i data-lucide="folder-search" class="w-6 h-6"></i>
+          </div>
+          <div>
+            <h3 id="queueEmptyTitle" class="text-sm font-semibold text-zinc-100">No Folders in Queue</h3>
+            <p id="queueEmptyDesc" class="text-xs text-zinc-400 max-w-md mt-1"></p>
+          </div>
+          <div class="flex flex-wrap justify-center gap-2 pt-2">
+            <button onclick="browseFolder()" class="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded text-xs font-medium transition active:scale-95">
+              Browse Another Directory
+            </button>
+            <button onclick="switchTab('table')" id="viewSkippedBtn" class="hidden px-3.5 py-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded text-xs font-medium transition active:scale-95">
+              View Skipped Folders
+            </button>
+          </div>
+        </div>
+
+        <!-- Active Layout: Stacks on mobile, Side-by-side split on desktop -->
+        <div id="queueActiveState" class="flex flex-col lg:grid lg:grid-cols-12 gap-2.5 sm:gap-3 lg:overflow-hidden h-full min-h-0 pb-20 lg:pb-0">
+
+          <!-- LEFT PANE: UNCROPPED IMAGE PREVIEW & FOLDER INFO (7 Cols on desktop) -->
+          <div class="lg:col-span-7 bg-zinc-900 border border-zinc-800 rounded-lg flex flex-col overflow-hidden shrink-0">
+            
+            <!-- Folder Name Bar -->
+            <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between gap-2 shrink-0 bg-zinc-900/90">
+              <div class="flex items-center gap-2 overflow-hidden flex-1 min-w-0">
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-mono font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 shrink-0">Ready</span>
+                <h2 id="currentFolderName" class="text-xs font-mono font-bold text-zinc-100 truncate select-all" title="Folder name">
+                  [folder_name]
+                </h2>
+              </div>
+              <div class="text-[11px] text-zinc-400 font-mono shrink-0 pl-1" id="currentFileCount">0 files</div>
+            </div>
+
+            <!-- Full Uncropped Image Preview Canvas -->
+            <div class="h-64 sm:h-80 lg:h-full lg:flex-1 bg-zinc-950/90 p-2 relative flex items-center justify-center overflow-hidden min-h-[240px]">
+              
+              <!-- Image element: object-contain with max-h-full max-w-full guarantees NO CROPPING -->
+              <div id="imageContainer" class="w-full h-full flex items-center justify-center relative">
+                <img 
+                  id="imagePreview" 
+                  src="" 
+                  alt="Folder preview" 
+                  class="max-h-full max-w-full object-contain mx-auto select-none rounded shadow-sm"
+                />
+              </div>
+
+              <!-- Fallback when no image exists -->
+              <div id="noImageFallback" class="hidden flex flex-col items-center justify-center text-zinc-500 space-y-1.5 p-6 text-center">
+                <i data-lucide="file-question" class="w-8 h-8 text-zinc-600"></i>
+                <p class="text-xs text-zinc-400">No image preview available</p>
+                <p class="text-[10px] text-zinc-600 font-mono">(Contains archives or documents)</p>
+              </div>
+
+              <!-- Multi-image Switcher Overlay (touch-friendly arrows) -->
+              <div id="imageSwitcherBar" class="hidden absolute bottom-2.5 bg-zinc-900/95 border border-zinc-700 rounded-md px-2.5 py-1 flex items-center gap-3 shadow-xl backdrop-blur text-xs font-mono">
+                <button type="button" onclick="cycleImage(-1)" class="p-1 hover:bg-zinc-800 rounded text-zinc-300 hover:text-white transition active:scale-90" aria-label="Previous image">
+                  <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                </button>
+                <span class="text-zinc-200 select-none text-[11px]">
+                  <span id="currentImageIdx">1</span> / <span id="totalImagesCount">1</span>
+                </span>
+                <button type="button" onclick="cycleImage(1)" class="p-1 hover:bg-zinc-800 rounded text-zinc-300 hover:text-white transition active:scale-90" aria-label="Next image">
+                  <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Left Footer: Sample Files List -->
+            <div class="px-3 py-1.5 border-t border-zinc-800 shrink-0 bg-zinc-900 flex items-center gap-2 overflow-x-auto">
+              <span class="text-[10px] font-medium text-zinc-500 uppercase tracking-wider shrink-0">Files:</span>
+              <div id="currentSampleFiles" class="flex items-center gap-1.5 overflow-x-auto py-0.5 text-[11px] font-mono text-zinc-300">
+                <!-- Rendered by JS -->
+              </div>
+            </div>
+
+          </div>
+
+          <!-- RIGHT PANE: ORGANIZATION & CONTROLS (5 Cols on desktop) -->
+          <div class="lg:col-span-5 bg-zinc-900 border border-zinc-800 rounded-lg flex flex-col lg:overflow-hidden">
+            
+            <!-- Stepper / Queue Navigation Header -->
+            <div class="px-3 py-2 border-b border-zinc-800 flex items-center justify-between shrink-0 bg-zinc-900/90">
+              <div class="flex items-center gap-1.5 font-mono text-xs">
+                <span class="text-zinc-400">Queue:</span>
+                <span id="currentIndexDisplay" class="font-bold text-indigo-400">1</span>
+                <span class="text-zinc-600">/</span>
+                <span id="totalQueueDisplay" class="font-bold text-zinc-200">0</span>
+              </div>
+              <div class="flex items-center gap-1">
+                <button onclick="prevFolder()" class="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition text-[11px] flex items-center gap-1 active:scale-95" title="Previous folder">
+                  <i data-lucide="chevron-left" class="w-3.5 h-3.5"></i>
+                  <span>Prev</span>
+                </button>
+                <button onclick="nextFolder()" class="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition text-[11px] flex items-center gap-1 active:scale-95" title="Next folder">
+                  <span>Next</span>
+                  <i data-lucide="chevron-right" class="w-3.5 h-3.5"></i>
+                </button>
+              </div>
+            </div>
+
+            <!-- Form Controls & Matching List -->
+            <div class="p-3 space-y-3.5 lg:overflow-y-auto lg:flex-1">
+              
+              <!-- 1. Username Selection -->
+              <div class="space-y-1.5">
+                <div class="flex items-center justify-between">
+                  <label class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">Target Username</label>
+                  <button type="button" onclick="clearUsername()" class="text-[10px] text-zinc-500 hover:text-zinc-300 py-0.5 px-1">Clear</button>
+                </div>
+
+                <!-- Input Box -->
+                <div class="relative">
+                  <input 
+                    type="text" 
+                    id="targetUsernameInput" 
+                    placeholder="Type or tap a tag below..."
+                    class="w-full bg-zinc-950 border border-zinc-700 focus:border-indigo-500 rounded px-3 py-2 text-xs sm:text-xs font-mono font-medium text-zinc-100 placeholder-zinc-600 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                    oninput="onUsernameChange(this.value)"
+                  />
+                </div>
+
+                <!-- Detected Tags Chips (Finger-friendly min-h) -->
+                <div class="space-y-1 pt-1">
+                  <div class="text-[10px] text-zinc-500">Detected from name (tap to select):</div>
+                  <div id="detectedTokensList" class="flex flex-wrap gap-1.5">
+                    <!-- Populated by JS -->
+                  </div>
+                </div>
+
+                <!-- Previously Used Usernames -->
+                <div id="knownUsernamesContainer" class="space-y-1 pt-1 hidden">
+                  <div class="text-[10px] text-zinc-500">Recently used:</div>
+                  <div id="knownUsernamesList" class="flex flex-wrap gap-1.5">
+                    <!-- Populated by JS -->
+                  </div>
+                </div>
+              </div>
+
+              <!-- 2. Select Matching Folders to Move -->
+              <div class="space-y-1.5 border-t border-zinc-800 pt-3">
+                <div class="flex items-center justify-between">
+                  <label class="text-[11px] font-semibold uppercase tracking-wider text-zinc-400">
+                    Folders to Move (<span id="matchingCountBadge">0</span>)
+                  </label>
+                  <div class="flex items-center gap-2 text-[11px]">
+                    <button type="button" onclick="selectAllMatching(true)" class="text-indigo-400 hover:text-indigo-300 py-0.5">Select All</button>
+                    <span class="text-zinc-600">|</span>
+                    <button type="button" onclick="selectAllMatching(false)" class="text-zinc-400 hover:text-zinc-300 py-0.5">None</button>
+                  </div>
+                </div>
+
+                <p class="text-[10px] text-zinc-500">Check folders to move into <code class="text-zinc-300" id="selectedUsernameLabel">/username</code></p>
+
+                <!-- Scrollable Checkbox List -->
+                <div id="matchingFoldersList" class="space-y-1.5 max-h-[190px] overflow-y-auto pr-1 font-mono text-[11px]">
+                  <!-- Checkbox items populated by JS -->
+                </div>
+              </div>
+
+            </div>
+
+            <!-- Bottom Action Bar (Fixed at bottom on Mobile, docked on Desktop) -->
+            <div class="fixed lg:static bottom-0 left-0 right-0 z-20 bg-zinc-900/95 lg:bg-zinc-900/90 backdrop-blur border-t border-zinc-800 p-2.5 sm:p-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:pb-3 shrink-0 space-y-1.5 shadow-2xl lg:shadow-none">
+              <div class="flex items-center gap-2 max-w-7xl mx-auto">
+                <button 
+                  type="button" 
+                  id="moveBtn"
+                  onclick="executeMove()"
+                  class="flex-1 py-2.5 px-4 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs sm:text-xs transition flex items-center justify-center gap-1.5 shadow-sm disabled:opacity-40 disabled:pointer-events-none active:scale-[0.98]"
+                >
+                  <i data-lucide="arrow-right" class="w-3.5 h-3.5"></i>
+                  <span id="moveBtnText">Move Selected</span>
+                </button>
+
+                <button 
+                  type="button" 
+                  onclick="skipCurrentFolder()"
+                  class="py-2.5 px-4 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 transition text-xs shrink-0 active:scale-[0.98]"
+                  title="Skip without moving (Esc)"
+                >
+                  Skip
+                </button>
+              </div>
+
+              <div class="hidden sm:flex items-center justify-between text-[10px] text-zinc-500 font-mono">
+                <span>Destination: same directory</span>
+                <span>Hotkeys: <kbd class="px-1 bg-zinc-800 rounded border border-zinc-700 text-zinc-300">Enter</kbd> move &bull; <kbd class="px-1 bg-zinc-800 rounded border border-zinc-700 text-zinc-300">Esc</kbd> skip</span>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+      </div>
+
+      <!-- VIEW 2: ALL FOLDERS TABLE VIEW -->
+      <div id="viewTable" class="hidden h-full flex flex-col overflow-hidden bg-zinc-900 border border-zinc-800 rounded-lg">
+        <!-- Table Toolbar -->
+        <div class="p-2 sm:p-2.5 border-b border-zinc-800 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2 shrink-0">
+          <div class="flex items-center gap-1.5 flex-wrap">
+            <button onclick="setTableFilter('ready')" id="filterReadyBtn" class="px-2.5 py-1 rounded text-xs font-medium bg-emerald-600 text-white">
+              Ready (<span id="tableFilterReadyCount">0</span>)
+            </button>
+            <button onclick="setTableFilter('skipped')" id="filterSkippedBtn" class="px-2.5 py-1 rounded text-xs font-medium bg-zinc-800 text-zinc-400 hover:text-zinc-200">
+              Skipped: Subfolders (<span id="tableFilterSkippedCount">0</span>)
+            </button>
+            <button onclick="setTableFilter('all')" id="filterAllBtn" class="px-2.5 py-1 rounded text-xs font-medium bg-zinc-800 text-zinc-400 hover:text-zinc-200">
+              All (<span id="tableFilterAllCount">0</span>)
+            </button>
+          </div>
+
+          <div class="w-full sm:w-56">
+            <input 
+              type="text" 
+              id="tableSearchInput" 
+              placeholder="Filter by name..." 
+              oninput="renderTable()"
+              class="w-full px-2.5 py-1 bg-zinc-950 border border-zinc-800 rounded text-xs text-zinc-200 focus:outline-none focus:border-indigo-500 font-mono"
+            />
+          </div>
+        </div>
+
+        <!-- Table Container with horizontal scroll on small screens -->
+        <div class="flex-1 overflow-auto">
+          <table class="w-full text-left text-xs text-zinc-300 font-mono min-w-[540px]">
+            <thead class="bg-zinc-950 text-zinc-400 border-b border-zinc-800 sticky top-0 uppercase text-[10px] tracking-wider">
+              <tr>
+                <th class="py-2 px-3 w-10 text-center">#</th>
+                <th class="py-2 px-3">Folder Name</th>
+                <th class="py-2 px-3 w-28">Status</th>
+                <th class="py-2 px-3 w-20">Files</th>
+                <th class="py-2 px-3">Tokens</th>
+                <th class="py-2 px-3 w-20 text-right">Action</th>
+              </tr>
+            </thead>
+            <tbody id="foldersTableBody" class="divide-y divide-zinc-800/60">
+              <!-- Rendered via JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <!-- In-Page Directory Browser Modal (Fully responsive) -->
+  <div id="dirModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm hidden p-2 sm:p-4">
+    <div class="bg-zinc-900 border border-zinc-800 rounded-lg w-full max-w-xl shadow-2xl flex flex-col max-h-[90dvh] sm:max-h-[80vh] overflow-hidden">
+      <!-- Modal Header -->
+      <div class="px-4 py-3 border-b border-zinc-800 flex items-center justify-between shrink-0">
+        <h3 class="text-xs font-semibold text-zinc-200 flex items-center gap-2">
+          <i data-lucide="folder" class="w-4 h-4 text-amber-400"></i>
+          <span>Select Directory</span>
+        </h3>
+        <button onclick="closeDirModal()" class="text-zinc-500 hover:text-zinc-300 p-1" aria-label="Close">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+
+      <!-- Current Path & Drives -->
+      <div class="px-3 sm:px-4 py-2.5 bg-zinc-950 border-b border-zinc-800 space-y-2 shrink-0">
+        <div class="flex items-center gap-1.5">
+          <button id="modalUpBtn" onclick="modalGoUp()" class="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 border border-zinc-700 text-xs shrink-0 active:scale-95" title="Up one folder">
+            Up
+          </button>
+          <input type="text" id="modalCurrentPath" class="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1 text-xs font-mono text-zinc-300 focus:outline-none truncate" readonly />
+        </div>
+        <!-- Quick Drives -->
+        <div class="flex items-center gap-1 flex-wrap">
+          <span class="text-[10px] text-zinc-500 mr-1 font-mono">Drives:</span>
+          <div id="drivesBar" class="flex items-center gap-1.5 flex-wrap"></div>
+        </div>
+      </div>
+
+      <!-- Folders List -->
+      <div class="p-2 overflow-y-auto flex-1 min-h-[220px] max-h-[380px] space-y-1 font-mono text-xs" id="modalFolderList"></div>
+
+      <!-- Modal Footer -->
+      <div class="px-3 sm:px-4 py-2.5 bg-zinc-950 border-t border-zinc-800 flex items-center justify-between shrink-0 gap-2">
+        <button type="button" onclick="openNativeWindowsDialog()" class="text-[11px] text-zinc-500 hover:text-zinc-300 transition truncate">
+          Windows popup
+        </button>
+        <div class="flex items-center gap-2 shrink-0">
+          <button type="button" onclick="closeDirModal()" class="px-3 py-1.5 rounded text-xs text-zinc-400 hover:bg-zinc-800 transition">
+            Cancel
+          </button>
+          <button type="button" onclick="confirmModalSelection()" id="modalSelectBtn" class="px-3.5 py-1.5 rounded text-xs font-medium bg-indigo-600 hover:bg-indigo-500 text-white transition active:scale-95">
+            Select Folder
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Notification Toast -->
+  <div id="toast" class="fixed top-4 right-4 sm:top-auto sm:bottom-4 z-50 transform -translate-y-16 sm:translate-y-16 opacity-0 transition-all duration-200 pointer-events-none">
+    <div id="toastInner" class="flex items-center gap-2 px-3 py-2 rounded shadow-lg border text-xs font-mono font-medium">
+      <i id="toastIcon" data-lucide="check" class="w-4 h-4"></i>
+      <span id="toastMessage"></span>
+    </div>
+  </div>
+
+  <!-- Application Logic -->
+  <script>
+    // State
+    let state = {
+      basePath: '',
+      readyFolders: [],
+      skippedFolders: [],
+      knownUsernames: [],
+      currentIndex: 0,
+      activeTab: 'queue',
+      tableFilter: 'ready',
+      currentUsername: '',
+      currentImageIndex: 0
+    };
+
+    // Modal state
+    let modalState = {
+      currentPath: '',
+      parentPath: '',
+      drives: []
+    };
+
+    document.addEventListener('DOMContentLoaded', () => {
+      lucide.createIcons();
+      setupHotkeys();
+
+      const urlParams = new URLSearchParams(window.location.search);
+      const dirParam = urlParams.get('dir');
+      if (dirParam) {
+        document.getElementById('directoryInput').value = dirParam;
+        scanDirectory();
+      }
+    });
+
+    function showToast(message, type = 'success') {
+      const toast = document.getElementById('toast');
+      const inner = document.getElementById('toastInner');
+      const msg = document.getElementById('toastMessage');
+      const icon = document.getElementById('toastIcon');
+
+      msg.innerText = message;
+      inner.className = 'flex items-center gap-2 px-3 py-2 rounded shadow-lg border text-xs font-mono font-medium ' + 
+        (type === 'success' ? 'bg-zinc-900 text-emerald-300 border-emerald-800' : 
+         type === 'error' ? 'bg-zinc-900 text-red-300 border-red-800' : 
+         'bg-zinc-900 text-zinc-200 border-zinc-700');
+
+      icon.setAttribute('data-lucide', type === 'success' ? 'check' : type === 'error' ? 'alert-circle' : 'info');
+      lucide.createIcons();
+
+      toast.classList.remove('-translate-y-16', 'translate-y-16', 'opacity-0');
+      toast.classList.add('translate-y-0', 'opacity-100');
+
+      setTimeout(() => {
+        toast.classList.remove('translate-y-0', 'opacity-100');
+        toast.classList.add(window.innerWidth < 640 ? '-translate-y-16' : 'translate-y-16', 'opacity-0');
+      }, 3000);
+    }
+
+    // Browse Folder in Modal
+    function browseFolder() {
+      const current = document.getElementById('directoryInput').value.trim();
+      document.getElementById('dirModal').classList.remove('hidden');
+      loadModalPath(current || '');
+    }
+
+    function closeDirModal() {
+      document.getElementById('dirModal').classList.add('hidden');
+    }
+
+    async function loadModalPath(path) {
+      const listContainer = document.getElementById('modalFolderList');
+      const pathInput = document.getElementById('modalCurrentPath');
+      listContainer.innerHTML = '<div class="py-12 text-center text-zinc-500 font-mono">Loading...</div>';
+
+      try {
+        const res = await fetch('/api/list_dirs', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: path })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to list folders');
+
+        if (modalState.drives.length === 0) {
+          fetch('/api/list_dirs')
+            .then(r => r.json())
+            .then(d => {
+              if (d.items) {
+                modalState.drives = d.items;
+                renderDrivesBar();
+              }
+            });
+        }
+
+        if (data.type === 'drives') {
+          modalState.currentPath = '';
+          modalState.parentPath = '';
+          pathInput.value = '(Computer Drives)';
+          renderModalDrives(data.items);
+        } else {
+          modalState.currentPath = data.current;
+          modalState.parentPath = data.parent;
+          pathInput.value = data.current;
+          renderModalFolders(data.items);
+        }
+      } catch (err) {
+        listContainer.innerHTML = `<div class="p-4 text-center text-red-400">${escapeHtml(err.message)}</div>`;
+      } finally {
+        lucide.createIcons();
+      }
+    }
+
+    function renderDrivesBar() {
+      const bar = document.getElementById('drivesBar');
+      bar.innerHTML = modalState.drives.map(drive => `
+        <button type="button" onclick="loadModalPath('${escapeJs(drive)}')" class="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-xs font-mono border border-zinc-700 transition active:scale-95">
+          ${escapeHtml(drive)}
+        </button>
+      `).join('');
+    }
+
+    function renderModalDrives(drives) {
+      const list = document.getElementById('modalFolderList');
+      list.innerHTML = drives.map(drive => `
+        <div onclick="loadModalPath('${escapeJs(drive)}')" class="flex items-center justify-between p-2.5 rounded hover:bg-zinc-800 cursor-pointer select-none active:bg-zinc-700">
+          <span class="font-bold text-zinc-200 text-xs">${escapeHtml(drive)}</span>
+          <i data-lucide="chevron-right" class="w-4 h-4 text-zinc-500"></i>
+        </div>
+      `).join('');
+    }
+
+    function renderModalFolders(folders) {
+      const list = document.getElementById('modalFolderList');
+      if (!folders || folders.length === 0) {
+        list.innerHTML = '<div class="py-8 text-center text-zinc-600">No subfolders in this directory</div>';
+        return;
+      }
+
+      list.innerHTML = folders.map(f => {
+        const full = (modalState.currentPath.endsWith('\\') ? modalState.currentPath : modalState.currentPath + '\\') + f;
+        return `
+          <div class="flex items-center justify-between p-2 rounded hover:bg-zinc-800/80 cursor-pointer group active:bg-zinc-700/60">
+            <div class="flex items-center gap-2 overflow-hidden flex-1 py-0.5" onclick="loadModalPath('${escapeJs(full)}')">
+              <i data-lucide="folder" class="w-3.5 h-3.5 text-amber-400 shrink-0"></i>
+              <span class="truncate text-zinc-300 group-hover:text-white">${escapeHtml(f)}</span>
+            </div>
+            <button type="button" onclick="selectSpecificFolder('${escapeJs(full)}')" class="px-2 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] transition shrink-0 active:scale-95">
+              Select
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function modalGoUp() {
+      if (!modalState.currentPath) return;
+      loadModalPath(modalState.parentPath || '');
+    }
+
+    function selectSpecificFolder(fullPath) {
+      document.getElementById('directoryInput').value = fullPath;
+      closeDirModal();
+      scanDirectory();
+    }
+
+    function confirmModalSelection() {
+      if (!modalState.currentPath) {
+        showToast('Please select a folder first', 'error');
+        return;
+      }
+      document.getElementById('directoryInput').value = modalState.currentPath;
+      closeDirModal();
+      scanDirectory();
+    }
+
+    async function openNativeWindowsDialog() {
+      closeDirModal();
+      const current = document.getElementById('directoryInput').value;
+      showToast('Opening Windows folder picker...', 'info');
+
+      try {
+        const res = await fetch('/api/browse', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initial_dir: current })
+        });
+        const data = await res.json();
+        if (data.success && data.path) {
+          document.getElementById('directoryInput').value = data.path;
+          scanDirectory();
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // Scan Directory
+    async function scanDirectory() {
+      const path = document.getElementById('directoryInput').value.trim();
+      if (!path) {
+        showToast('Please specify a directory first', 'error');
+        return;
+      }
+
+      const scanBtn = document.getElementById('scanBtn');
+      const scanIcon = document.getElementById('scanIcon');
+      scanBtn.disabled = true;
+      scanIcon.classList.add('animate-spin');
+
+      try {
+        const res = await fetch('/api/scan', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: path })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to scan');
+
+        state.basePath = data.base_path;
+        state.readyFolders = data.ready_folders || [];
+        state.skippedFolders = data.skipped_folders || [];
+        state.knownUsernames = data.known_usernames || [];
+        state.currentIndex = 0;
+        state.currentImageIndex = 0;
+
+        updateStats(data);
+        renderCurrentFolder();
+        renderTable();
+
+        document.getElementById('emptyState').classList.add('hidden');
+        document.getElementById('workspace').classList.remove('hidden');
+        document.getElementById('statsBar').classList.remove('hidden');
+        document.getElementById('statsBar').classList.add('flex');
+        document.getElementById('tabControls').classList.remove('hidden');
+        document.getElementById('tabControls').classList.add('flex');
+
+        showToast(`Scanned ${data.total_folders} folders (${state.readyFolders.length} ready)`);
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        scanBtn.disabled = false;
+        scanIcon.classList.remove('animate-spin');
+        lucide.createIcons();
+      }
+    }
+
+    function updateStats(data) {
+      document.getElementById('statTotal').innerText = data.total_folders;
+      document.getElementById('statReady').innerText = state.readyFolders.length;
+      document.getElementById('statSkipped').innerText = state.skippedFolders.length;
+
+      document.getElementById('tableFilterReadyCount').innerText = state.readyFolders.length;
+      document.getElementById('tableFilterSkippedCount').innerText = state.skippedFolders.length;
+      document.getElementById('tableFilterAllCount').innerText = data.total_folders;
+    }
+
+    function switchTab(tab) {
+      state.activeTab = tab;
+      const queueBtn = document.getElementById('tabQueueBtn');
+      const tableBtn = document.getElementById('tabTableBtn');
+      const viewQueue = document.getElementById('viewQueue');
+      const viewTable = document.getElementById('viewTable');
+
+      if (tab === 'queue') {
+        queueBtn.className = 'px-2.5 py-1 rounded bg-zinc-800 text-white font-medium text-[11px]';
+        tableBtn.className = 'px-2.5 py-1 rounded text-zinc-400 hover:text-white text-[11px]';
+        viewQueue.classList.remove('hidden');
+        viewTable.classList.add('hidden');
+        renderCurrentFolder();
+      } else {
+        tableBtn.className = 'px-2.5 py-1 rounded bg-zinc-800 text-white font-medium text-[11px]';
+        queueBtn.className = 'px-2.5 py-1 rounded text-zinc-400 hover:text-white text-[11px]';
+        viewTable.classList.remove('hidden');
+        viewQueue.classList.add('hidden');
+        renderTable();
+      }
+      lucide.createIcons();
+    }
+
+    // Render Current Folder in Split View
+    function renderCurrentFolder() {
+      const queueLen = state.readyFolders.length;
+      document.getElementById('totalQueueDisplay').innerText = queueLen;
+
+      const activeState = document.getElementById('queueActiveState');
+      const emptyState = document.getElementById('queueEmptyState');
+      const emptyTitle = document.getElementById('queueEmptyTitle');
+      const emptyDesc = document.getElementById('queueEmptyDesc');
+      const emptyIcon = document.getElementById('queueEmptyIcon');
+      const viewSkippedBtn = document.getElementById('viewSkippedBtn');
+
+      if (queueLen === 0) {
+        activeState.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+
+        const movedCount = parseInt(document.getElementById('statMoved').innerText) || 0;
+
+        if (movedCount > 0) {
+          emptyIcon.innerHTML = '<i data-lucide="check" class="w-6 h-6 text-emerald-400"></i>';
+          emptyTitle.innerText = 'All Folders Organized';
+          emptyDesc.innerText = `Moved ${movedCount} folder(s) into their respective username folders.`;
+          viewSkippedBtn.classList.add('hidden');
+        } else if (state.skippedFolders.length > 0) {
+          emptyIcon.innerHTML = '<i data-lucide="alert-triangle" class="w-6 h-6 text-amber-400"></i>';
+          emptyTitle.innerText = '0 Ready Folders (All Skipped)';
+          emptyDesc.innerText = `Found ${state.skippedFolders.length} folder(s), but all contain subfolders. Subfolder-containing folders are skipped automatically.`;
+          viewSkippedBtn.classList.remove('hidden');
+        } else {
+          emptyIcon.innerHTML = '<i data-lucide="folder-x" class="w-6 h-6 text-zinc-500"></i>';
+          emptyTitle.innerText = 'No Subfolders Found';
+          emptyDesc.innerText = 'This directory has no immediate child folders. Please browse to a folder containing downloaded folders.';
+          viewSkippedBtn.classList.add('hidden');
+        }
+
+        lucide.createIcons();
+        return;
+      }
+
+      emptyState.classList.add('hidden');
+      activeState.classList.remove('hidden');
+
+      if (state.currentIndex >= queueLen) state.currentIndex = queueLen - 1;
+      if (state.currentIndex < 0) state.currentIndex = 0;
+
+      document.getElementById('currentIndexDisplay').innerText = state.currentIndex + 1;
+      const folder = state.readyFolders[state.currentIndex];
+
+      // Folder Name & Files Count
+      document.getElementById('currentFolderName').innerText = folder.name;
+      document.getElementById('currentFileCount').innerText = `${folder.file_count} files`;
+
+      // Reset image index when switching folder
+      state.currentImageIndex = 0;
+      renderImagePreview(folder);
+
+      // Sample Files
+      const sampleContainer = document.getElementById('currentSampleFiles');
+      if (folder.sample_files && folder.sample_files.length > 0) {
+        sampleContainer.innerHTML = folder.sample_files.map(f => `
+          <span class="px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-300 border border-zinc-700/60 truncate max-w-[140px] shrink-0 text-[10px]">
+            ${escapeHtml(f)}
+          </span>
+        `).join('');
+      } else {
+        sampleContainer.innerHTML = '<span class="text-zinc-600 italic">No files in folder</span>';
+      }
+
+      // Detected Tokens Badges (Finger-friendly)
+      const tokensContainer = document.getElementById('detectedTokensList');
+      if (folder.tokens && folder.tokens.length > 0) {
+        tokensContainer.innerHTML = folder.tokens.map(token => `
+          <button 
+            type="button" 
+            onclick="selectUsername('${escapeJs(token)}')"
+            class="px-2.5 py-1.5 rounded bg-zinc-800 hover:bg-indigo-600 active:bg-indigo-500 text-zinc-200 hover:text-white border border-zinc-700/80 font-mono text-xs transition active:scale-95"
+          >
+            ${escapeHtml(token)}
+          </button>
+        `).join('');
+      } else {
+        tokensContainer.innerHTML = '<span class="text-[10px] text-zinc-600 italic">No bracket tags detected. Write username below.</span>';
+      }
+
+      // Known Usernames
+      const knownContainer = document.getElementById('knownUsernamesContainer');
+      const knownList = document.getElementById('knownUsernamesList');
+      if (state.knownUsernames && state.knownUsernames.length > 0) {
+        knownContainer.classList.remove('hidden');
+        knownList.innerHTML = state.knownUsernames.map(uname => `
+          <button 
+            type="button" 
+            onclick="selectUsername('${escapeJs(uname)}')"
+            class="px-2.5 py-1 rounded bg-zinc-800/80 hover:bg-zinc-700 active:bg-zinc-600 text-zinc-300 hover:text-zinc-100 border border-zinc-700 text-[11px] font-mono transition active:scale-95"
+          >
+            ${escapeHtml(uname)}
+          </button>
+        `).join('');
+      } else {
+        knownContainer.classList.add('hidden');
+      }
+
+      // Pre-select first token if present
+      if (folder.tokens && folder.tokens.length > 0) {
+        selectUsername(folder.tokens[0]);
+      } else {
+        selectUsername('');
+      }
+
+      lucide.createIcons();
+    }
+
+    // Render Full Uncropped Image Preview
+    function renderImagePreview(folder) {
+      const img = document.getElementById('imagePreview');
+      const fallback = document.getElementById('noImageFallback');
+      const switcher = document.getElementById('imageSwitcherBar');
+      const images = folder.image_files || (folder.preview_file ? [folder.preview_file] : []);
+
+      if (images.length > 0) {
+        fallback.classList.add('hidden');
+        img.classList.remove('hidden');
+
+        if (state.currentImageIndex >= images.length) state.currentImageIndex = 0;
+        if (state.currentImageIndex < 0) state.currentImageIndex = images.length - 1;
+
+        const currentImgFile = images[state.currentImageIndex];
+        img.src = `/api/preview?folder=${encodeURIComponent(folder.path)}&file=${encodeURIComponent(currentImgFile)}`;
+
+        if (images.length > 1) {
+          switcher.classList.remove('hidden');
+          switcher.classList.add('flex');
+          document.getElementById('currentImageIdx').innerText = state.currentImageIndex + 1;
+          document.getElementById('totalImagesCount').innerText = images.length;
+        } else {
+          switcher.classList.add('hidden');
+          switcher.classList.remove('flex');
+        }
+      } else {
+        img.classList.add('hidden');
+        fallback.classList.remove('hidden');
+        switcher.classList.add('hidden');
+        switcher.classList.remove('flex');
+      }
+    }
+
+    function cycleImage(direction) {
+      const folder = state.readyFolders[state.currentIndex];
+      if (!folder || !folder.image_files || folder.image_files.length <= 1) return;
+      state.currentImageIndex += direction;
+      renderImagePreview(folder);
+    }
+
+    function selectUsername(username) {
+      document.getElementById('targetUsernameInput').value = username;
+      onUsernameChange(username);
+    }
+
+    function clearUsername() {
+      selectUsername('');
+      document.getElementById('targetUsernameInput').focus();
+    }
+
+    function onUsernameChange(username) {
+      state.currentUsername = username.trim();
+      document.getElementById('selectedUsernameLabel').innerText = state.currentUsername ? `/${state.currentUsername}` : '/(username)';
+      updateMatchingFoldersList();
+      updateMoveButton();
+    }
+
+    function updateMatchingFoldersList() {
+      const container = document.getElementById('matchingFoldersList');
+      const currentFolder = state.readyFolders[state.currentIndex];
+
+      if (!state.currentUsername || !currentFolder) {
+        container.innerHTML = '<div class="text-[10px] text-zinc-600 italic py-2">Select or write a username to see matching folders</div>';
+        document.getElementById('matchingCountBadge').innerText = '0';
+        return;
+      }
+
+      const query = state.currentUsername.toLowerCase();
+      const matching = state.readyFolders.filter(f => f.name.toLowerCase().includes(query));
+
+      const finalFolders = [currentFolder];
+      for (const f of matching) {
+        if (f.name !== currentFolder.name) {
+          finalFolders.push(f);
+        }
+      }
+
+      document.getElementById('matchingCountBadge').innerText = finalFolders.length;
+
+      container.innerHTML = finalFolders.map(f => {
+        const isCurrent = f.name === currentFolder.name;
+        return `
+          <label class="flex items-center justify-between p-2 rounded border ${isCurrent ? 'bg-zinc-800/90 border-indigo-700/60' : 'bg-zinc-950/60 border-zinc-800'} hover:bg-zinc-800/50 transition cursor-pointer select-none active:bg-zinc-800">
+            <div class="flex items-center gap-2.5 overflow-hidden flex-1">
+              <input 
+                type="checkbox" 
+                class="folder-checkbox w-4 h-4 rounded text-indigo-600 bg-zinc-900 border-zinc-700 focus:ring-0" 
+                value="${escapeHtml(f.name)}"
+                checked
+                onchange="updateMoveButton()"
+              />
+              <span class="truncate text-zinc-200 text-xs">${escapeHtml(f.name)}</span>
+            </div>
+            <div class="flex items-center gap-1.5 shrink-0 pl-2">
+              <span class="text-[10px] text-zinc-500 font-mono">${f.file_count} files</span>
+              ${isCurrent ? '<span class="text-[9px] px-1 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Current</span>' : ''}
+            </div>
+          </label>
+        `;
+      }).join('');
+
+      updateMoveButton();
+    }
+
+    function selectAllMatching(checked) {
+      document.querySelectorAll('.folder-checkbox').forEach(cb => cb.checked = checked);
+      updateMoveButton();
+    }
+
+    function getSelectedFolderNames() {
+      const checked = [];
+      document.querySelectorAll('.folder-checkbox:checked').forEach(cb => checked.push(cb.value));
+      return checked;
+    }
+
+    function updateMoveButton() {
+      const selected = getSelectedFolderNames();
+      const btn = document.getElementById('moveBtn');
+      const btnText = document.getElementById('moveBtnText');
+
+      if (!state.currentUsername || selected.length === 0) {
+        btn.disabled = true;
+        btnText.innerText = 'Select folder(s) to move';
+      } else {
+        btn.disabled = false;
+        btnText.innerText = `Move ${selected.length} Selected to "${state.currentUsername}/"`;
+      }
+    }
+
+    async function executeMove() {
+      const selected = getSelectedFolderNames();
+      const username = state.currentUsername;
+
+      if (!username) {
+        showToast('Specify a username first', 'error');
+        return;
+      }
+      if (selected.length === 0) {
+        showToast('No folders selected', 'error');
+        return;
+      }
+
+      const btn = document.getElementById('moveBtn');
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/move', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base_path: state.basePath,
+            username: username,
+            folder_names: selected
+          })
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Failed to move');
+
+        showToast(`Moved ${data.moved_count} folder(s) to ${username}/`);
+
+        const movedSet = new Set(data.moved_folders);
+        state.readyFolders = state.readyFolders.filter(f => !movedSet.has(f.name));
+
+        if (!state.knownUsernames.includes(username)) {
+          state.knownUsernames.push(username);
+          state.knownUsernames.sort();
+        }
+
+        const currentMoved = parseInt(document.getElementById('statMoved').innerText) || 0;
+        document.getElementById('statMoved').innerText = currentMoved + data.moved_count;
+        document.getElementById('statReady').innerText = state.readyFolders.length;
+
+        document.getElementById('undoBtn').classList.remove('hidden');
+        document.getElementById('undoBtn').classList.add('inline-flex');
+
+        renderCurrentFolder();
+        renderTable();
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function skipCurrentFolder() {
+      if (state.readyFolders.length === 0) return;
+      state.currentIndex = (state.currentIndex + 1) % state.readyFolders.length;
+      renderCurrentFolder();
+    }
+
+    function prevFolder() {
+      if (state.readyFolders.length === 0) return;
+      state.currentIndex = (state.currentIndex - 1 + state.readyFolders.length) % state.readyFolders.length;
+      renderCurrentFolder();
+    }
+
+    function nextFolder() {
+      if (state.readyFolders.length === 0) return;
+      state.currentIndex = (state.currentIndex + 1) % state.readyFolders.length;
+      renderCurrentFolder();
+    }
+
+    async function undoLastMove() {
+      try {
+        const res = await fetch('/api/undo', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Undo failed');
+
+        showToast(`Restored ${data.reverted_count} folder(s)`);
+        scanDirectory();
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
+    }
+
+    // TABLE VIEW
+    function setTableFilter(filter) {
+      state.tableFilter = filter;
+      document.getElementById('filterReadyBtn').className = filter === 'ready' ? 
+        'px-2.5 py-1 rounded text-xs font-medium bg-emerald-600 text-white' : 
+        'px-2.5 py-1 rounded text-xs font-medium bg-zinc-800 text-zinc-400 hover:text-zinc-200';
+
+      document.getElementById('filterSkippedBtn').className = filter === 'skipped' ? 
+        'px-2.5 py-1 rounded text-xs font-medium bg-amber-600 text-white' : 
+        'px-2.5 py-1 rounded text-xs font-medium bg-zinc-800 text-zinc-400 hover:text-zinc-200';
+
+      document.getElementById('filterAllBtn').className = filter === 'all' ? 
+        'px-2.5 py-1 rounded text-xs font-medium bg-zinc-700 text-white' : 
+        'px-2.5 py-1 rounded text-xs font-medium bg-zinc-800 text-zinc-400 hover:text-zinc-200';
+
+      renderTable();
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById('foldersTableBody');
+      const search = (document.getElementById('tableSearchInput')?.value || '').toLowerCase();
+
+      let list = [];
+      if (state.tableFilter === 'ready') list = state.readyFolders;
+      else if (state.tableFilter === 'skipped') list = state.skippedFolders;
+      else list = [...state.readyFolders, ...state.skippedFolders];
+
+      if (search) {
+        list = list.filter(f => f.name.toLowerCase().includes(search));
+      }
+
+      if (list.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="text-center py-8 text-zinc-600 italic">No folders match filter</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = list.map((f, i) => {
+        const isSkipped = f.status === 'skipped';
+        return `
+          <tr class="hover:bg-zinc-800/40 transition">
+            <td class="py-2 px-3 text-center text-zinc-600">${i + 1}</td>
+            <td class="py-2 px-3 font-medium text-zinc-200">
+              <span class="block truncate max-w-sm">${escapeHtml(f.name)}</span>
+              ${isSkipped ? `<span class="text-[10px] text-amber-500/90">${escapeHtml(f.reason || 'Has subfolders')}</span>` : ''}
+            </td>
+            <td class="py-2 px-3">
+              <span class="px-1.5 py-0.5 rounded text-[10px] ${isSkipped ? 'bg-amber-500/10 text-amber-400 border border-amber-500/20' : 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'}">
+                ${isSkipped ? 'Skipped' : 'Ready'}
+              </span>
+            </td>
+            <td class="py-2 px-3 text-zinc-400">${f.file_count}</td>
+            <td class="py-2 px-3">
+              <div class="flex flex-wrap gap-1">
+                ${(f.tokens || []).slice(0, 3).map(t => `<span class="px-1 py-0.5 bg-zinc-800 rounded text-[10px] text-zinc-300 border border-zinc-700/60">${escapeHtml(t)}</span>`).join('')}
+              </div>
+            </td>
+            <td class="py-2 px-3 text-right">
+              ${!isSkipped ? `
+                <button onclick="jumpToFolderInQueue('${escapeJs(f.name)}')" class="px-2.5 py-1 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[11px] transition active:scale-95">
+                  Review
+                </button>
+              ` : '<span class="text-zinc-600 text-[10px]">-</span>'}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function jumpToFolderInQueue(folderName) {
+      const idx = state.readyFolders.findIndex(f => f.name === folderName);
+      if (idx !== -1) {
+        state.currentIndex = idx;
+        switchTab('queue');
+      }
+    }
+
+    function setupHotkeys() {
+      window.addEventListener('keydown', (e) => {
+        if (state.activeTab !== 'queue') return;
+        const activeTag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
+        if (activeTag === 'input' && e.key !== 'Enter') return;
+
+        if (e.key === 'Enter' && !e.shiftKey) {
+          const moveBtn = document.getElementById('moveBtn');
+          if (moveBtn && !moveBtn.disabled) {
+            e.preventDefault();
+            executeMove();
+          }
+        } else if (e.key === 'Escape') {
+          e.preventDefault();
+          skipCurrentFolder();
+        } else if (e.key === 'ArrowRight' && activeTag !== 'input') {
+          e.preventDefault();
+          nextFolder();
+        } else if (e.key === 'ArrowLeft' && activeTag !== 'input') {
+          e.preventDefault();
+          prevFolder();
+        }
+      });
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+    }
+
+    function escapeJs(str) {
+      if (!str) return '';
+      return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+    }
+  </script>
+</body>
+</html>
