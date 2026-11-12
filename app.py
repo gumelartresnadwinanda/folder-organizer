@@ -224,6 +224,52 @@ def list_dirs():
         'items': subdirs
     })
 
+@app.route('/api/check_target', methods=['POST'])
+def check_target():
+    """
+    Checks if a target username folder already exists and returns its contents
+    so users can see what has already been moved into it.
+    """
+    data = request.get_json(silent=True) or {}
+    base_path = data.get('base_path', '').strip()
+    username = sanitize_folder_name(data.get('username', ''))
+
+    if not base_path or not username or not os.path.isdir(base_path):
+        return jsonify({'exists': False, 'count': 0, 'items': []})
+
+    target_dir = os.path.normpath(os.path.join(base_path, username))
+    if not os.path.isdir(target_dir):
+        return jsonify({'exists': False, 'count': 0, 'items': []})
+
+    existing_items = []
+    try:
+        with os.scandir(target_dir) as it:
+            for entry in it:
+                is_dir = entry.is_dir(follow_symlinks=False)
+                size_str = ""
+                if not is_dir:
+                    try:
+                        sz = entry.stat().st_size
+                        size_str = f"{round(sz / 1024, 1)} KB" if sz < 1048576 else f"{round(sz / 1048576, 1)} MB"
+                    except Exception:
+                        pass
+
+                existing_items.append({
+                    'name': entry.name,
+                    'is_dir': is_dir,
+                    'size_str': size_str
+                })
+        existing_items.sort(key=lambda x: x['name'].lower())
+    except Exception as e:
+        return jsonify({'error': str(e), 'exists': True, 'count': 0, 'items': []}), 500
+
+    return jsonify({
+        'exists': True,
+        'target_dir': target_dir,
+        'count': len(existing_items),
+        'items': existing_items[:100]
+    })
+
 @app.route('/')
 def index():
     return render_template('index.html')
